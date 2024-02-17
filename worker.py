@@ -70,7 +70,7 @@ def loadworkers():
 loadworkers()
 
 while True:
-    res = requests.get("http://localhost:7860/dequeue")
+    res = requests.get("https://huggingface.co/spaces/MrOvkill/Snail")
     if res.status_code != 200:
         print("Error. Sleeping 10s...")
         time.sleep(10)
@@ -88,7 +88,7 @@ while True:
         imgs = []
         imgs.append(opendalle(prompt))
         print("Generated. Uploading...")
-        r = requests.post("http://localhost:7860/complete", json=mkbpk(imgs, id))
+        r = requests.post("https://huggingface.co/spaces/MrOvkill/Snail", json=mkbpk(imgs, id))
     else:
         print("No work. Sleeping 10s...")
         time.sleep(10)
