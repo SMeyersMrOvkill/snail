@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, jsonify, Request, Response
+from flask import Flask, render_template, request, redirect, url_for, jsonify, request, Response
 import json
 
 import base64
@@ -23,7 +23,14 @@ models = []
 
 WORKERS = []
 
-def enqueue(prompt: str):
+def enqueue():
+    data = request.json
+    if not "prompt" in data:
+        return jsonify({
+            "status": "error",
+            "reason": "missing 'prompt'"
+        })
+    prompt = data["prompt"]
     tm = time.time()
     hsh =  hashlib.sha256(prompt.encode("utf-8")).hexdigest()
     md = {
@@ -49,21 +56,26 @@ def dequeue():
         "status": "empty"
     })
     
-def complete(data):
-    jsn = json.loads(data)
-    for i in range(len(models)):
-        if models[i]["id"] == jsn["_id"]:
-            models[i]["status"] = "done"
-            for fl in jsn["files"]:
-                rd = zstd.decompress(base64.b64decode(fl["data"]))
-                os.makedirs(f"files/{fl['path']}", exist_ok=True)
-                os.rmdir(f"files/{fl['path']}")
-                with open(f"files/{fl['path']}", "wb") as f:
-                    f.write(rd)
-                    f.flush()
-                    f.close()
-            break
-    return jsonify({"status": "ok"})
+def complete():
+    data = request.get_json(force=True)
+    if not "files" in data:
+        return jsonify({
+            "status": "error",
+            "action": "store"
+        })
+    if not "id" in data:
+        return jsonify({
+            "status": "error",
+            "action": "store"
+        })
+    _id = data['id']
+    for file in data['files']:
+        pth = os.path.join(".", "requests", _id + ".json")
+        if not os.path.exists(pth):
+            os.makedirs(pth)
+            os.rmdir(pth)
+        f = open(pth, "w")
+        f.write(json.dumps(file))
         
 def worker():
     while True:
@@ -74,6 +86,7 @@ def worker():
                 if w["status"] == "idle":
                     w["prompt"] = pr["prompt"]
                     w["id"] = pr["id"]
+                    w["status"] = "queue"
                     break
             else:
                 q.put(jsonify(pr))
@@ -82,7 +95,7 @@ def worker():
 app = Flask(__name__)
 
 if __name__ == "__main__":
-    app.add_url_rule("/enqueue/<prompt>", "enqueue", enqueue, methods=["POST"])
+    app.add_url_rule("/enqueue", "enqueue", enqueue, methods=["POST"])
     app.add_url_rule("/dequeue", "dequeue", dequeue, methods=["GET"])
     app.add_url_rule("/complete", "complete", complete, methods=["POST"])
     app.add_url_rule("/", "index", lambda: """

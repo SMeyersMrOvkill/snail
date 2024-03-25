@@ -3,7 +3,7 @@ import os
 import subprocess
 import time
 import json
-from diffusers import AutoPipelineForText2Image
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import zstandard as zstd
 import torch
 import pickle
@@ -11,11 +11,20 @@ import hashlib
 import requests
 
 pipes = {}
-pipes["opendalle"] = AutoPipelineForText2Image.from_pretrained('dataautogpt3/OpenDalleV1.1', torch_dtype=torch.float16).to("cuda")
+#pipes["opendalle"] = AutoPipelineForText2Image.from_pretrained('dataautogpt3/OpenDalleV1.1', torch_dtype=torch.float16).to("cuda")
 
-def mkbpk(files: list, id: str):
+def __call_gemma_sm(prompt: str):
+    pass
+
+pipes["gemma-sm"] = {
+    "model": AutoModelForCausalLM.from_pretrained("google/gemma-2b-it"),
+    "tokenizer": AutoTokenizer.from_pretrained("google/gemma-2b-it"),
+    "call": __call_gemma_sm
+}
+
+def mkbpk(files: list, _id: str):
     ls = {
-        "_id": id,
+        "id": _id,
         "files": []
     }
     for fl in files:
@@ -41,36 +50,8 @@ def opendalle(prompt: str):
 global workers
 workers = []
 
-def loadworkers():
-    workers = []
-    setups = []
-    fnl = []
-    for wrk in os.listdir("workers"):
-        if wrk.endswith(".py"):
-            proc = subprocess.Popen(executable="/usr/bin/env", args=["python", wrk, "--prompt", "dry_run"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False)
-            rc = proc.wait()
-            print(f"Popen returned {rc}")
-            if not rc or rc == 0:
-                fnl.append({
-                    "name": wrk,
-                    "setup": True
-                })
-                continue
-            stdout, stderr = proc.communicate()
-            fnl.append({
-                "name": wrk,
-                "setup": f"""--- Output ---
-        {stdout}
-        --- Error ---
-        {stderr}
-        """
-            })
-            return fnl
-
-loadworkers()
-
 while True:
-    res = requests.get("https://huggingface.co/spaces/MrOvkill/Snail")
+    res = requests.get("http://127.0.0.1:7860/dequeue")
     if res.status_code != 200:
         print("Error. Sleeping 10s...")
         time.sleep(10)
@@ -82,13 +63,15 @@ while True:
         continue
     prompt = jsn["prompt"]
     status = jsn["status"]
-    id = jsn["id"]
+    _id = jsn["id"]
     if status.lower() == "ok":
         print(f"Acquired prompt '{prompt}'. Generating...")
-        imgs = []
-        imgs.append(opendalle(prompt))
-        print("Generated. Uploading...")
-        r = requests.post("https://huggingface.co/spaces/MrOvkill/Snail", json=mkbpk(imgs, id))
+        pk = mkbpk([pipes['gemma-sm']["call"](prompt)], _id)
+        hdr = {
+            "Content-Type": "application/json"
+        }
+        res = requests.post("http://127.0.0.1:7860/complete", json=pk, headers=hdr)
+        print(res.json())
     else:
         print("No work. Sleeping 10s...")
         time.sleep(10)
